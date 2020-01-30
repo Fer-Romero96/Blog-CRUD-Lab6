@@ -28,8 +28,8 @@ legend {
 }
 
 .formElement {
-    padding: 5px 110px;
-    width: 30px;
+    
+    width: 10%;
 }
 
 select[name=rate] {
@@ -37,7 +37,7 @@ select[name=rate] {
     width: 300px;
 }
 
-#submitButton , #submit, #busb{
+#submitButton , #submit, #busb, #eliminar{
     padding: 10px 20px;
     font-size: 16px;
     border: 0px;

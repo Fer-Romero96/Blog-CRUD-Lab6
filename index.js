@@ -2,14 +2,18 @@ let express = require("express");
 let morgan = require("morgan");
 let uuid = require("uuid/v4");
 let bodyParser = require("body-parser");
+let mongoose = require("mongoose");
 let jsonParser = bodyParser.json();
 let app = express();
+let {ComentariosList} = require("./model");
+let server; 
+let {DATABASE_URL, PORT} = require("./config");
 
 app.use(express.static("public"));
 app.use(morgan("dev"));
 
 
-
+/*
 let comentarios = [{
     id : "123",
     titulo : "Titulo1",
@@ -32,47 +36,64 @@ let comentarios = [{
     fecha: Date()
 
 }];
-
+*/
 
 app.get("/blog-api/comentarios", (req,res) =>{
-    console.log(req);
-    return res.status(200).json(comentarios);
+
+    ComentariosList.getAll()
+    .then(ComentariosList => {
+        return res.status(200).json(ComentariosList);
+    })
+    .catch(error =>{
+        console.log(error);
+        res.statusMessage = "Hubo un error de conexion con la base de datos";
+        return res.status(500).send();
+    })    
 });
 
 app.get("/blog-api/comentarios-por-autor", (req,res) =>{
     let autor = req.query.autor;
 
-    let result = comentarios.filter( (elements ) => {
-        if(elements.autor == autor){
-            return elements;
-        }
-    }); 
+    if (autor != ""){
+        ComentariosList.getAutor(req.query.autor)
+        .then((comentario) =>{
+            if(comentario){
+                return res.status(200).json(comentario);
+            }
 
-    if (autor){
-        if(result){
-            return res.status(200).json(result);
-
-        }else{
             return res.status(404).send("Este autor no tiene comentarios");
-        }
-        
+        })
+        .catch ((error) =>{
+            res.statusMessage = "Error con la base de datos";
+            return res.status(500).json(error);
+            
+
+        })  
     }else{
         return res.status(406).send("No se administro correctamente el autor");
     };
 });
 
 app.post("/blog-api/nuevo-comentario" , jsonParser , (req, res) =>{
-    let comentario = req.body;
+    let newComentario = req.body;
     let titulo = req.body.titulo;
     let contenido = req.body.contenido;
     let autor = req.body.autor;
+
   
     if(titulo != null && contenido != null && autor != null){
-        comentario.id = uuid();
-        comentario.fecha = Date();
-        comentarios.push(comentario);
-        console.log(req.body);
-        return res.status(201).json(comentario);
+        newComentario.id = uuid();
+        newComentario.fecha = Date();
+
+        ComentariosList.create( newComentario )
+            .then ((newComentario) =>{
+                return res.status(201).json(newComentario);
+            }).catch ((error) =>{
+                res.statusMessage ="Error en conexion con la base de datos";
+                return res.status(500).json(error);
+        });
+        
+        
     }else {
         return res.status(406).send("Falta algun Elemento");
     }
@@ -80,51 +101,47 @@ app.post("/blog-api/nuevo-comentario" , jsonParser , (req, res) =>{
 
 app.delete("/blog-api/remover-comentario/:id", jsonParser, (req, res)=>{
     let id = req.params.id;
+    let idBody = req.body.id;
+    if (idBody != null && idBody != ""){
+        if(id == idBody){
+            ComentariosList.eliminar(req.body.id)
+            .then(result =>{
+                return res.status(200).send("Comentario Eliminado");
+            
+            })
+            .catch(error =>{
+                return res.status(404).send("No existe el ID");
+            });
 
-    let result = comentarios.find( ( elements ) => {
-        if(elements.id == id){
-            return elements;
+        }else{
+            return res.status(409).send("los ID del cuerpo y parametro no coinciden");
         }
-    }); 
 
-    if (result){
-        comentarios = comentarios.filter((elements) =>{
-            if(elements.id != result.id){
-                return elements;
-            }
-        });
+    }else{
+        return res.status(406).send("Falta administrar el id en el cuerpo");
 
-        return res.status(200).send("Comentario Eliminado");
+    }
 
-    } else {
-        return res.status(404).send("No existe el ID");
-    };
 });
 
 app.put("/blog-api/actualizar-comentario/:id", jsonParser , (req,res) =>{
     let idBody = req.body.id;
-    let idParam = req.params.id;
     let titulo = req.body.titulo;
-    let contenido = req.body.contenido;
     let autor = req.body.autor;
+    let contenido = req.body.contenido;
+    let idParam = req.params.id;
 
     if(idBody != null && idBody != ""){
         if(idBody == idParam){
             if(titulo != null || contenido != null || autor != null){
-                let result = comentarios.find( ( elements ) => {
-                    if(elements.id == idBody){
-                        if(titulo != null){
-                            return elements.titulo = titulo;
-                        } 
-                        if(contenido != null){
-                            return elements.contenido = contenido;
-                        }
-                        if(autor != null){
-                            return elements.autor = autor;
-                        }
-                    }
+                ComentariosList.actualizar(titulo,autor,contenido,idBody)
+                .then( (comentario) =>{
+                    return res.status(202).json(comentario); 
                 })
-                return res.status(202).json(result);                   
+                .catch((error) =>{
+                    return res.status(500).send();
+                })
+                                  
             }else{
                 return res.status(406).send("No hay ningun campo a actualizar");
             };
@@ -137,7 +154,46 @@ app.put("/blog-api/actualizar-comentario/:id", jsonParser , (req,res) =>{
 });
 
 
+function runServer(port, databaseUrl){
+	return new Promise( (resolve, reject ) => {
+		mongoose.connect(databaseUrl, response => {
+			if ( response ){
+				return reject(response);
+			}
+			else{
+				server = app.listen(port, () => {
+					console.log( "App is running on port " + port );
+					resolve();
+				})
+				.on( 'error', err => {
+					mongoose.disconnect();
+					return reject(err);
+				})
+			}
+		});
+	});
+}
 
-app.listen(8080, () =>{
-    console.log("Servidor corriendo en puerto 8080");
-});
+function closeServer(){
+	return mongoose.disconnect()
+		.then(() => {
+			return new Promise((resolve, reject) => {
+				console.log('Closing the server');
+				server.close( err => {
+					if (err){
+						return reject(err);
+					}
+					else{
+						resolve();
+					}
+				});
+			});
+		});
+}
+
+runServer( PORT, DATABASE_URL );
+
+module.exports = { app, runServer, closeServer }
+
+
+
